@@ -21,17 +21,19 @@ const getPatients = async (page: number) => {
       continue;
     }
 
-    if (result?.error === "Service temporarily unavailable") {
-      console.log(
-        `Service temporarily unavailable, trying again after ${defaultRefetchTime} seconds`
-      );
-      await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
-      continue;
-    }
     if (result?.error === "Rate limit exceeded") {
       const waitTime = result.retry_after;
       console.log(`Rate limit exceeded, trying again after ${waitTime} seconds`);
       await new Promise((resolve) => setTimeout(resolve, waitTime * 1000));
+      continue;
+    }
+
+    // Generic errors: "Service temporarily unavailable" || "Bad gateway"
+    if (result?.error) {
+      console.log(
+        `Service temporarily unavailable, trying again after ${defaultRefetchTime} seconds`
+      );
+      await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
       continue;
     }
 
