@@ -37,6 +37,20 @@ const getPatients = async (page: number) => {
       continue;
     }
 
+    // Ensure all patients are gathered
+    if (
+      result.data.every((patient) => {
+        console.log("🚀 ~ route.ts:42 ~ getPatients ~ patient:", !!patient.patient_id);
+        return !!patient.patient_id;
+      }) === false
+    ) {
+      console.log(
+        `Not every patient in page returned, trying again after ${defaultRefetchTime} seconds`
+      );
+      await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
+      continue;
+    }
+
     return result;
   }
   throw new Error("Unable to resolve all patients");
