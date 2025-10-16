@@ -4,9 +4,9 @@ import { NextResponse } from "next/server";
 const defaultRefetchTime = 5;
 
 const processPatients = (patients: Patient[]): PatientRisk => {
-  let high_risk_patients: PatientRisk["high_risk_patients"] = [];
-  let fever_patients: PatientRisk["fever_patients"] = [];
-  let data_quality_issues: PatientRisk["data_quality_issues"] = [];
+  const high_risk_patients: PatientRisk["high_risk_patients"] = [];
+  const fever_patients: PatientRisk["fever_patients"] = [];
+  const data_quality_issues: PatientRisk["data_quality_issues"] = [];
 
   for (const patient of patients) {
     let totalRiskScore = 0;
@@ -14,7 +14,7 @@ const processPatients = (patients: Patient[]): PatientRisk => {
 
     if (typeof patient?.temperature === "number") {
       if (patient.temperature >= 99.6) {
-        fever_patients = [...fever_patients, patient.patient_id];
+        fever_patients.push(patient.patient_id);
         totalRiskScore++;
       }
       if (patient.temperature >= 101) {
@@ -36,37 +36,35 @@ const processPatients = (patients: Patient[]): PatientRisk => {
     }
 
     if (typeof patient?.blood_pressure === "string") {
-      const [systolicStr, diastolicStr] = patient.blood_pressure.split("/");
+      const bloodPressure = patient.blood_pressure.split("/");
 
+      const [systolicStr, diastolicStr] = bloodPressure;
       const systolic = Number(systolicStr);
       const diastolic = Number(diastolicStr);
-      const trueSystolic = Number.isFinite(systolic);
-      const trueDiastolic = Number.isFinite(systolic);
+      const trueSystolic = Number.isFinite(systolic) && systolicStr.length;
+      const trueDiastolic = Number.isFinite(diastolic) && diastolicStr.length;
 
-      if (trueSystolic && trueDiastolic) {
-        if (systolic >= 120 && diastolic >= 80) {
+      if (!trueSystolic || !trueDiastolic || bloodPressure.length !== 2) {
+        hasDataIssues = true;
+      } else {
+        if (systolic >= 140 || diastolic >= 90) {
+          totalRiskScore = totalRiskScore + 3;
+        } else if (systolic >= 130 || diastolic >= 80) {
+          totalRiskScore = totalRiskScore + 2;
+        } else if (systolic >= 120 && systolic <= 129 && diastolic < 80) {
           totalRiskScore++;
         }
-      } else {
-        hasDataIssues = true;
-      }
-
-      if ((trueSystolic && systolic >= 130) || (trueDiastolic && diastolic >= 80)) {
-        totalRiskScore++;
-      }
-      if ((trueSystolic && systolic >= 140) || (trueDiastolic && diastolic >= 90)) {
-        totalRiskScore++;
       }
     } else {
       hasDataIssues = true;
     }
 
     if (hasDataIssues) {
-      data_quality_issues = [...data_quality_issues, patient.patient_id];
+      data_quality_issues.push(patient.patient_id);
     }
 
     if (totalRiskScore >= 4) {
-      high_risk_patients = [...high_risk_patients, patient.patient_id];
+      high_risk_patients.push(patient.patient_id);
     }
   }
 
@@ -90,12 +88,6 @@ const getPatients = async (page: number) => {
     );
     const result = await response.json();
 
-    if (page === 1 && !result.pagination.totalPages) {
-      console.log(`No pagination provided, trying again after ${defaultRefetchTime} seconds`);
-      await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
-      continue;
-    }
-
     if (result?.error === "Rate limit exceeded") {
       const waitTime = result.retry_after;
       console.log(`Rate limit exceeded, trying again after ${waitTime} seconds`);
@@ -104,10 +96,16 @@ const getPatients = async (page: number) => {
     }
 
     // Generic errors: "Service temporarily unavailable" || "Bad gateway"
-    if (result?.error) {
+    if (result?.error || !result?.data) {
       console.log(
         `Service temporarily unavailable, trying again after ${defaultRefetchTime} seconds`
       );
+      await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
+      continue;
+    }
+
+    if (page === 1 && !result.pagination.totalPages) {
+      console.log(`No pagination provided, trying again after ${defaultRefetchTime} seconds`);
       await new Promise((resolve) => setTimeout(resolve, defaultRefetchTime * 1000));
       continue;
     }
@@ -139,11 +137,11 @@ export async function GET() {
     const results = await Promise.all(remainingPages.map(getPatients));
 
     const allPatients = [...firstPage.data, ...results.flatMap((result) => result.data)];
-    const processedPatients = processPatients(allPatients)
-    console.log("🚀 ~ route.ts:67 ~ GET ~ allPatients:", allPatients);
-    console.log("🚀 ~ route.ts:143 ~ GET ~ processedPatients:", processedPatients)
-    return NextResponse.json(allPatients);
-  } catch {
+    const processedPatients = processPatients(allPatients);
+    console.log("🚀 ~ route.ts:143 ~ GET ~ processedPatients:", processedPatients);
+    return NextResponse.json({ allPatients, processedPatients });
+  } catch (err) {
+    console.error("Error fetching patients:", err);
     return NextResponse.json({ error: "Unable to resolve all patients" });
   }
 }
